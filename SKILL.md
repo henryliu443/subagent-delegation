@@ -5,6 +5,23 @@
 
 ---
 
+## Activation
+
+This skill is consulted ONLY when the main agent is about to:
+
+- spawn a sub-agent (task tool, agent delegation, parallel agent branches)
+- plan a multi-branch exploration or investigation
+- design a workflow, pipeline, or agent configuration that contains delegation
+
+This skill is NOT consulted for:
+
+- direct edits, single-file changes, trivial fixes (e.g. changing two characters)
+- reading files, searching, running tests, or any task the main agent does inline
+
+Small tasks never reach the delegation decision point. They are handled inline with zero overhead — there is nothing to bypass.
+
+---
+
 ## Purpose
 
 This skill exists to answer one question precisely:
