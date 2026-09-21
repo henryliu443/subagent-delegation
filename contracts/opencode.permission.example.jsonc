@@ -1,0 +1,32 @@
+{
+  // Native OpenCode permission baseline. Merge this into opencode.json.
+  // This is STATIC and applies to every session in the workspace.
+  // Per-delegation, contract-derived boundaries are enforced dynamically by
+  // plugin/guard.js at `tool.execute.before` (see README "Enforcement Matrix").
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "external_directory": {
+      "*": "ask"
+    },
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.pem": "deny",
+      "*.key": "deny"
+    },
+    "edit": {
+      "*": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git reset --hard*": "deny",
+      "git push*": "deny",
+      "git clean*": "deny",
+      "rm -rf*": "deny"
+    }
+  }
+}

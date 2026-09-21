@@ -1,0 +1,36 @@
+{
+  "delegation": {
+    "id": "demo-task-001",
+    "goal": "Demonstrate bounded runtime guard in child-a",
+    "context": {
+      "include": ["child-a/**"],
+      "exclude": [".git/**", "secrets/**"]
+    },
+    "authority": {
+      "read": ["child-a/**"],
+      "write": ["child-a/**"],
+      "execute": ["pytest", "python3"],
+      "deny": [
+        "git push*",
+        "git reset --hard*",
+        "git clean*",
+        "rm -rf*",
+        "delete",
+        ".git/**",
+        "repository structure changes"
+      ]
+    },
+    "return": {
+      "format": "structured",
+      "required": ["findings", "evidence"]
+    },
+    "verification": {
+      "required": true,
+      "commands": []
+    },
+    "budget": {
+      "max_tokens": 5000,
+      "max_duration_seconds": 60
+    }
+  }
+}

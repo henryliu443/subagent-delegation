@@ -1,0 +1,36 @@
+{
+  "delegation": {
+    "id": "delegate-auth-audit-001",
+    "goal": "Audit JWT expiration handling and add negative test cases in auth tests",
+    "context": {
+      "include": ["src/auth/**", "tests/auth/**"],
+      "exclude": [".git/**", "secrets/**", "**/.env*"]
+    },
+    "authority": {
+      "read": ["src/auth/**", "tests/auth/**"],
+      "write": ["tests/auth/**"],
+      "execute": ["pytest tests/auth", "python3 -m unittest"],
+      "deny": [
+        "git push*",
+        "git reset --hard*",
+        "git clean*",
+        "rm -rf*",
+        "delete",
+        ".git/**",
+        "repository structure changes"
+      ]
+    },
+    "return": {
+      "format": "structured",
+      "required": ["status", "findings", "evidence", "uncertainty"]
+    },
+    "verification": {
+      "required": true,
+      "commands": ["pytest tests/auth"]
+    },
+    "budget": {
+      "max_tokens": 20000,
+      "max_duration_seconds": 300
+    }
+  }
+}

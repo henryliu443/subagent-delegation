@@ -1,54 +1,79 @@
-# Sub-Agent Delegation Skill
+# Sub-Agent Delegation 控制层
 
-**主 Agent 什么时候应该把任务交给 sub-agent，什么时候应该自己做？**
+**主 Agent 什么时候该把任务交给 sub-agent？sub-agent 在运行时到底被什么真正约束？**
 
 [English](README.md) | **中文**
 
 [![Made for OpenCode](https://img.shields.io/badge/made%20for-OpenCode-000000?style=flat-square)](https://opencode.ai)
-[![类型：Agent Skill](https://img.shields.io/badge/%E7%B1%BB%E5%9E%8B-Agent%20Skill-6f42c1?style=flat-square)](#)
-[![状态：开放问题](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E5%BC%80%E6%94%BE%E9%97%AE%E9%A2%98-orange?style=flat-square)](#开放问题)
+[![类型：Delegation 控制层](https://img.shields.io/badge/type-control%20layer-6f42c1?style=flat-square)](#)
+[![运行时格式：JSON](https://img.shields.io/badge/contract-JSON%20only-success?style=flat-square)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-> 一个给 coding agent 用的 delegation 决策框架。
-> 不是"更多 Agent = 更先进"。这是关于 **delegation 的边界与经济性**。
+> 一个面向 coding agent 的 delegation 决策框架与运行时强制层。
+> 不是“更多 Agent = 更先进”。这是关于**谁被允许做什么，由运行时来强制**。
 
 ---
 
-## 这是什么
+## 核心思想
 
-这个 repo 是一个可安装的 OpenCode skill（也可适配其他 coding agent）。它精确回答一个问题：
+> **Sub-agent 不是能力扩展，而是运行时上下文分裂（runtime context fork）。**
+> **Agent 可以决定“要不要 delegation”，但不能决定 delegation 获得什么权限。**
 
-> **什么情况下，把一个任务交给 sub-agent 产生的价值大于它的成本？**
+```text
+Instructions 告诉 Agent 它应该做什么。
+Runtime policy 决定它被允许做什么。
+```
 
-它**不是** sub-agent 的实现，而是一个决策模型：结构化的判断某个任务该分叉给 sub-agent、该主 Agent 自己做、还是混合处理。
+---
 
-### 核心原则
+## 强制模型（先读这段）
 
-> **Sub-agent 不是能力扩展，而是运行时上下文分裂（context fork）。**
+本仓库有三层，互不等价：
 
-一个 sub-agent 是被授予以下东西的执行单元：
-- 一个**局部目标**
-- 一个**局部上下文**（与主 Agent 的 context window 隔离）
-- 一个**局部权限**（限定的行动范围）
-- 一个**返回契约**（结构化结果，而非对话）
+| 层级 | 含义 | 位置 |
+|---|---|---|
+| **RUNTIME ENFORCED** | 违规会在 OpenCode 进程内、在工具执行前或无论模型意图如何被中止。 | OpenCode `permission` 配置、plugin `tool.execute.before` |
+| **PARTIALLY ENFORCED** | 只覆盖部分情况，可以绕过。 | `bash` 命令前缀规则、post-tool 检测 |
+| **DOCUMENTATION ONLY** | 只是“要求”模型遵守，没有任何东西阻止它。 | `SKILL.md`、`AGENTS.md`、`/delegate` prompt |
 
-它是否作为独立进程、独立模型、独立 prompt 运行，都是实现细节。架构含义是：**context 被分叉，只有契约化的结果流回来。**
+### 真实执行链
+
+```text
+Agent（LLM 发出 tool call）
+   ↓
+OpenCode runtime
+   ├─ permission 检查（config.permission / agent frontmatter）   [原生，RUNTIME ENFORCED]
+   ├─ plugin hook  tool.execute.before（throw = 中止）            [原生，RUNTIME ENFORCED]
+   ↓
+Tool 实现（bash / edit / write / read / task / ...）
+   ├─ plugin hook  tool.execute.after（仅检测）                  [原生，DETECTION ONLY]
+   ↓
+OS / filesystem / shell   ← bash 启动后唯一的硬边界
+```
+
+`bin/subagent-guard`（Python）**不在**这条链上。它是离线 verifier。
+只有 Agent 主动调用它时它才起作用——那属于 DOCUMENTATION ONLY。
 
 ---
 
 ## 仓库内容
 
-| 文件 | 用途 |
-|---|---|
-| `SKILL.md` | delegation 决策模型——7 种 delegation 价值、13 个因子、5 个触发条件、5 个否决条件、返回契约、分层授权架构 |
-| `global/AGENTS.md` | 安装到 `~/AGENTS.md` 的全局钩子——让 Agent 在 spawn sub-agent 前先查 `SKILL.md` |
-| `global/command/delegate.md` | OpenCode 的全局 `/delegate` 斜杠命令 |
-| `install.sh` | 一键安装脚本，放置全局钩子和命令 |
-| `AGENTS.md` | 项目级 Agent 配置 |
+| 路径 | 用途 | 层级 |
+|---|---|---|
+| `plugin/guard.js` | OpenCode plugin。在 `tool.execute.before` 强制契约；越权的 `read`/`edit`/`write` 直接中止。 | **RUNTIME ENFORCED** |
+| `contracts/opencode.permission.example.jsonc` | 原生 `permission` 基线（外部目录、密钥、破坏性前缀）。 | 合并后 **RUNTIME ENFORCED** |
+| `contracts/agent.example.md` | 原生 per-subagent `permission` frontmatter。 | 使用后 **RUNTIME ENFORCED** |
+| `contracts/schema.json`、`contracts/example-contract.json` | Delegation Contract schema 与示例。JSON 是唯一运行时格式。 | — |
+| `test/guard-plugin.test.mjs` | 测试真实 plugin hook：范围内放行，越权/穿越/受保护路径拒绝，bash 检测。 | — |
+| `guard/`、`bin/subagent-guard` | 离线 verifier / policy 计算器。不是边界。 | DOCUMENTATION ONLY |
+| `SKILL.md` | delegation 决策模型（7 价值、13 因子、5 触发、5 否决、分层授权）。 | DOCUMENTATION ONLY |
+| `global/AGENTS.md`、`global/command/delegate.md` | 全局钩子 + `/delegate` prompt。 | DOCUMENTATION ONLY |
+| `demo/` | 通过离线 verifier 跑的边界 demo（6 用例）。 | — |
+| `install.sh` | 纯本地安装脚本（钩子、命令、plugin、verifier 软链）。 | — |
 
 ---
 
-## 安装
+## 安装（本地、离线、不碰密钥）
 
 ```bash
 git clone https://github.com/henryliu443/subagent-delegation.git
@@ -56,106 +81,139 @@ cd subagent-delegation
 ./install.sh
 ```
 
-`install.sh` 做两件事：
+会把 plugin 放到 `~/.config/opencode/plugins/guard.js`，OpenCode 自动加载。
+**没有契约时 plugin 完全惰性**，不会影响无关项目。
 
-1. 复制 `global/AGENTS.md` → `~/AGENTS.md`（全局 delegation 钩子）
-2. 复制 `global/command/delegate.md` → `~/.config/opencode/command/delegate.md`（全局 `/delegate` 命令）
+按项目激活：
 
-之后在**任意**项目里打开 OpenCode，钩子即生效。
+```bash
+# 方式 A：项目内契约
+mkdir -p .opencode
+cp /path/to/example-contract.json .opencode/delegation-contract.json
 
-> **API key 说明：** 本仓库不含任何密钥。Provider 配置（`~/.config/opencode/opencode.jsonc`）留在本地，永不提交。
-
----
-
-## 使用方式
-
-### 自动
-
-安装后，全局钩子会让 Agent 在 spawn 任何 sub-agent 前先查 `SKILL.md`。小事（直接编辑、单文件改动、搜索、测试）永远不会到达 delegation 决策点——它们零开销自动 bypass。
-
-### 手动
-
-用 `/delegate` 命令对任意任务或计划跑决策模型：
-
-```
-/delegate 探索这个代码库所有 API 端点并梳理依赖关系
-```
-
-返回：
-
-```
-RECOMMENDATION: DELEGATE | INLINE | HYBRID
-Confidence: high | medium | low
-Reasoning: <1-3 句>
-Sub-agent type: <parallel | context-branch | reviewer | verifier | sandbox>
-Return contract: <返回什么>
-Risk: <可能出什么问题>
+# 方式 B：显式路径
+export DELEGATION_CONTRACT=/abs/path/contract.json
 ```
 
 ---
 
-## 决策模型（摘要）
+## Delegation Contract（JSON —— 唯一运行时格式）
 
-**满足任一触发条件且无否决条件时，delegate：**
-
-1. Context 污染高，且内联执行会占用主 context 的 20% 以上
-2. 两个或以上分支各自需要局部判断
-3. 验证价值高，且验证者真正独立
-4. 失败概率非平凡、任务是探索性的、且失败代价高
-5. 任务完全独立、非阻塞、且委派更便宜
-
-**满足任一否决条件时，不要 delegate：**
-
-1. 任务是 trivial 的（机械、确定、无需判断）
-2. 任务需要与主 Agent 当前推理共享 context
-3. delegation 开销 > 预期收益
-4. 任务不可逆且关键，且没有独立验证
-5. script、tool 或 workflow 能以同等或更好可靠性完成
-
-完整 13 因子模型、返回契约和分层授权架构见 `SKILL.md`。
-
----
-
-## 什么不应该做成 Sub-Agent
-
-| 常被误分类的场景 | 正确的抽象 |
-|---|---|
-| 机械并行化 | `script`、`CI`、并行 tool call |
-| 确定性的多步工作流 | `workflow`、pipeline、DAG |
-| 长时间运行的计算 | `job`、queue、async task |
-| 简单文件搜索 | `tool call` |
-| 格式化或 lint | `script`、hook |
-| "让模型换个思路想" | `prompt variation`，不是新 Agent |
-
-> **经验法则：** 如果一个任务不需要**不确定性下的局部判断**，它就不需要 Agent。它需要一个工具。
-
----
-
-## 架构：谁拥有 Delegation 的决定权？
-
-不是单一决策点，而是一组**嵌套约束**：
-
-```
-Layer 1 — 人类     ：风险边界、预算、不可委派类别、审批门
-Layer 2 — Workflow ：可委派类别、返回契约模板、并行上限
-Layer 3 — Agent    ：在边界内决定这一次是否委派
-Layer 4 — 系统     ：审计日志、回滚、成本追踪、失败隔离
+```json
+{
+  "delegation": {
+    "id": "delegate-001",
+    "goal": "审计 JWT 过期处理并补充负向测试",
+    "context": {
+      "include": ["src/auth/**", "tests/auth/**"],
+      "exclude": [".git/**", "secrets/**", "**/.env*"]
+    },
+    "authority": {
+      "read": ["src/auth/**", "tests/auth/**"],
+      "write": ["tests/auth/**"],
+      "execute": ["pytest tests/auth"],
+      "deny": ["git push*", "git reset --hard*", "git clean*", "rm -rf*", "delete", ".git/**"]
+    },
+    "return": { "format": "structured", "required": ["status", "findings", "evidence", "uncertainty"] },
+    "verification": { "required": true, "commands": ["pytest tests/auth"] },
+    "budget": { "max_tokens": 20000, "max_duration_seconds": 300 }
+  }
+}
 ```
 
-把规则全写进 workflow 会僵化，把决定权全给模型会导致 sub-agent 泛滥。**分层才是现实解。**
+> YAML 可出现在文档里便于阅读，但**运行时永不解析 YAML**。运行时只解析 JSON。
 
 ---
 
-## 开放问题
+## plugin 如何强制
 
-本仓库刻意保留其核心问题为开放状态：
+在 `tool.execute.before`（已在实际 `app.asar` 中验证：该 hook 在 `tool.execute` **之前**被 await），
+对 `read` / `edit` / `write` / `patch`：
 
-1. **是否存在非文本的状态压缩协议？** Sub-agent 能否把认知增量直接注入共享状态图或记忆，绕过自然语言汇报？
-2. **是否存在一种运行时上下文分叉，让"判断是否委派"和"实际执行"在不同 context 中发生？** 还是所有 delegation 阈值本质上都是信息不足下的先验下注？
-3. **Claude、Kimi、OpenCode 在 delegation 哲学上究竟有何区别？** 公开资料不足——标记为未知，不做假设。
+1. 用 workspace root 解析 `args.filePath`。
+2. 路径含 `..` → **DENY**。
+3. 解析后逃出 workspace root → **DENY**。
+4. 触碰 `.git` → **DENY**。
+5. 命中 `context.exclude` 或 `authority.deny` → **DENY**。
+6. 不匹配 `authority.read`（读）或 `authority.write`（写）→ **DENY**。
+7. 否则放行。
+
+任何 DENY 都会 throw，工具调用不会执行。
+
+`tool.execute.after` 只对 `bash` 运行，且是 **DETECTION ONLY**——报告 `authority.write` 之外被改动的文件，
+无法阻止 bash 已经做出的改动。
 
 ---
 
-## License
+## 原生 OpenCode permission
+
+能用原生 `permission` 静态表达的都交给它。见 `contracts/opencode.permission.example.jsonc`
+（基线）与 `contracts/agent.example.md`（per-subagent frontmatter）。要点：
+
+- `external_directory` —— workspace 之外的路径。
+- `read` —— 密钥文件模式。
+- `bash` —— 命令前缀规则。**PARTIALLY ENFORCED**：前缀是字符串匹配，可用 `python3 -c`、变量拼接、base64 绕过。
+
+---
+
+## 验证
+
+```bash
+node test/guard-plugin.test.mjs   # plugin 强制（before + after）
+./demo/run_demo.sh                # 离线 verifier 边界 demo
+```
+
+---
+
+## 强制级别对照表（准确版）
+
+| 机制 | 层级 | 支撑 |
+|---|---|---|
+| 契约的 `read`/`edit`/`write` 路径边界 | **RUNTIME ENFORCED** | plugin `tool.execute.before`（执行前 throw） |
+| `..` 穿越 / 逃出 workspace | **RUNTIME ENFORCED** | plugin `tool.execute.before` |
+| `.git` 保护 | **RUNTIME ENFORCED** | plugin `tool.execute.before` |
+| `external_directory` | **RUNTIME ENFORCED** | 原生 `permission` |
+| per-subagent `edit: deny` 等 | **RUNTIME ENFORCED** | 原生 agent frontmatter |
+| `bash` 破坏性命令 | **PARTIALLY ENFORCED** | 原生 `permission.bash` 前缀 + plugin after-hook 检测 |
+| `bash` 的文件系统效果 | **PARTIALLY ENFORCED** | after-hook 只能检测，无法阻止 |
+| post-tool 变更审计 | **DETECTION ONLY** | plugin `tool.execute.after` |
+| `bin/subagent-guard` CLI | **DOCUMENTATION ONLY** | 仅在主动调用时生效 |
+| delegation 决策 / `/delegate` 输出 | **DOCUMENTATION ONLY** | prompt |
+
+---
+
+## 威胁模型：agent 能否关掉 guard？
+
+针对实际安装布局审计。“Agent” = 持有 `bash` + `edit`/`write` 的 subagent。
+
+| 攻击 | 走 `edit`/`write` 工具 | 走 `bash` |
+|---|---|---|
+| 覆写 `~/.config/opencode/plugins/guard.js` | **已阻断**（路径逃出 workspace） | **可绕过**（已实测：bash 改写了文件） |
+| 修改 `~/.config/opencode/opencode.jsonc` | **已阻断** | **可绕过** |
+| 修改契约 `<ws>/.opencode/delegation-contract.json` | **已阻断** | **可绕过** |
+| 先放宽契约再操作 | 先阻断，但契约会被重读 | **可绕过**（每次调用都重读契约） |
+| 在子 shell 里 `export DELEGATION_CONTRACT=...` | — | **已阻断**（子进程环境不影响 OpenCode 进程） |
+| 把 `export` 写进 `~/.zshrc` | — | **下次重启后可绕过** |
+| 往 `.opencode/plugins/` 丢新 plugin | — | **未验证**（需要重启才加载） |
+
+对持有 `bash` 的 agent 而言，guard **不是信任边界**：plugin、原生配置、契约都是普通用户可写文件，
+而 post-tool 检测看不到它们（它们在 git 仓库之外）。
+
+---
+
+## 已知绕过路径（如实列出）
+
+1. **`bash` 是最大缺口。** plugin 看到的 `bash` 是不透明字符串。持有 `bash` 的 subagent 可以覆写 `guard.js`、OpenCode 配置或契约。这是**实测复现**，不是推测。真正隔离需要 OS 沙箱（容器/`bwrap`/受限用户），或把 `bash` 限制在安全前缀白名单内。
+2. **契约每次调用都重读。** 它是可变文件；放宽它会立刻改变后续 tool call 的策略。guard 不会对自身契约做 pin 或 hash。
+3. **post-tool 检测被限制在仓库内。** `git status` 看不到仓库之外的写入，因此对 plugin 或全局配置的篡改对 after-hook 不可见。
+4. **契约作用域是进程级。** hook 处没有 per-session 身份。per-subagent 作用域必须靠原生 agent frontmatter。
+5. **`DELEGATION_CONTRACT` 是进程环境变量。** 子 shell 无法在运行时改它，但写进 shell profile 并重启 OpenCode 后就会生效。
+
+**结论：** 路径边界对 `read`/`edit`/`write` 工具是真实的；但对能执行任意 `bash` 的 agent **不是**边界。
+要关闭它需要 OS 级隔离；在同一个进程、同一套文件权限下无法关闭。
+
+---
+
+## 许可证
 
 MIT

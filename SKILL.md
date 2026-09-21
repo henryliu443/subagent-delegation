@@ -170,6 +170,199 @@ ReturnContract:
 
 ---
 
+## The Delegation Contract
+
+A sub-agent is not bounded by polite instructions. It is bounded by a **machine-readable Delegation Contract**.
+
+> **Delegation Contract is the sub-agent's authority boundary, not a prompt suggestion.**
+
+### Contract Specification (JSON is the only runtime format)
+
+```json
+{
+  "delegation": {
+    "id": "delegate-001",
+    "goal": "Review authentication implementation and add negative tests",
+    "context": {
+      "include": ["src/auth/**", "tests/auth/**"],
+      "exclude": [".git/**", "secrets/**", "**/.env*"]
+    },
+    "authority": {
+      "read": ["src/auth/**", "tests/auth/**"],
+      "write": ["tests/auth/**"],
+      "execute": ["pytest tests/auth", "python3 -m unittest"],
+      "deny": ["git push*", "git reset --hard*", "git clean*", "rm -rf*", "delete", ".git/**"]
+    },
+    "return": { "format": "structured", "required": ["status", "findings", "evidence", "uncertainty"] },
+    "verification": { "required": true, "commands": ["pytest tests/auth"] },
+    "budget": { "max_tokens": 20000, "max_duration_seconds": 300 }
+  }
+}
+```
+
+> YAML is documentation only. Runtime parsing is JSON only.
+
+---
+
+## The Runtime Guard (how it is actually enforced)
+
+Agents can decide *whether delegation is needed*, but the agent cannot decide what permissions
+delegation gets, and cannot bypass the runtime enforcement.
+
+```text
+Main Agent
+    ↓
+Delegation Decision (SKILL.md / /delegate)          [DOCUMENTATION ONLY]
+    ↓
+Delegation Contract (.opencode/delegation-contract.json)
+    ↓
+OpenCode runtime
+    ├─ native permission                            [RUNTIME ENFORCED]
+    └─ plugin guard.js  tool.execute.before (throw) [RUNTIME ENFORCED]
+    ↓
+Sub-agent Execution
+```
+
+`bin/subagent-guard` is an **offline verifier**, not the boundary. It only runs when invoked.
+Do not describe it as enforcement.
+
+### Enforcement levels
+
+- **RUNTIME ENFORCED** — OpenCode `permission` and the plugin `tool.execute.before` hook
+  (verified: the hook is awaited before the tool executes, so throwing aborts the call).
+- **PARTIALLY ENFORCED** — `bash` prefix rules and post-tool detection.
+- **DOCUMENTATION ONLY** — everything in this file, `AGENTS.md`, and `/delegate` output.
+
+### Operation Taxonomy
+
+| Category | Policy | Description / Examples |
+|---|---|---|
+| **ALLOW** | Automatic | Path within `authority.read` / `authority.write`; not excluded, not denied, not protected. |
+| **ASK** | Human Approval Required | Native permission `ask` (external directories, non-allowlisted `bash`). |
+| **DENY** | Strictly Blocked | Path traversal (`..`), workspace escape, `.git`, `context.exclude`, `authority.deny`, or any path outside the relevant authority list. Enforced by the plugin hook. |
+
+---
+
+## Architecture Change Gate
+
+A major hazard in autonomous coding agents is runaway blast radius: when a localized task fails (such as a dependency resolution error or test failure), the model attempts to fix it by altering the architecture of the repository.
+
+> **Agent rule:** An agent is NEVER permitted to automatically alter repository architecture because of a localized failure.
+
+### Intercepted Operations
+
+- Repository root or workspace root alterations
+- Package root changes (modifying/deleting `pyproject.toml`, `package.json`, `Cargo.toml`, etc.)
+- Parent directory deletion or modification (`rm -rf ..`, `delete parent/`)
+- Sibling project modifications
+- Direct tampering with `.git` internals
+- Restructuring top-level directory layout or package hierarchy
+
+When detected by the Architecture Gate:
+
+```text
+BLOCKED
+
+Architectural change detected.
+
+Reason:
+<reason>
+
+Requested:
+<operation>
+
+Required:
+Human approval
+```
+
+The model **cannot** self-approve or explain away an architectural change gate block.
+
+---
+
+## Verification Gate
+
+An agent cannot unilaterally announce `DONE`. Completion is a verified state transition:
+
+```text
+EXECUTE
+   ↓
+VERIFY
+   ↓
+PASS
+   ↓
+DONE
+```
+
+### Verification Checks
+
+1. **Working Tree Boundary Check:** Evaluates `git status --porcelain` to verify that no files outside `authority.write` were touched, and no protected or architectural files were modified.
+2. **Deterministic Commands:** Executes verification commands (`pytest`, `npm test`, linter, build) defined in `contract.verification.commands`.
+
+If verification fails:
+
+```text
+COMPLETION REJECTED
+
+Reason:
+<verification failure diagnostics>
+```
+
+Failure diagnostics are returned to the agent to remediate within its authority boundaries.
+
+---
+
+## The Watchdog
+
+A lightweight, non-intrusive monitor designed to detect runaway, stalled, or anomalous sub-agents without complex daemons:
+
+```text
+Periodically checks (~20s interval or step evaluation):
+- Current working directory (must remain within workspace boundary)
+- Git status (checks for unauthorized or protected file modifications)
+- Changed files (compares against contract write globs)
+- Last action timestamp (flags inactivity or hung subprocesses)
+- Task state (flags repeated failures)
+```
+
+If a violation is detected:
+
+```text
+PAUSE / BLOCK
+
+Watchdog violation detected:
+<violation details>
+```
+
+**Guard Principles:**
+- No auto-recovery
+- No auto-restart
+- No unauthorized self-repair
+- Control is immediately returned to the main agent / human
+
+---
+
+## Separation of Concerns: Instructions vs. Runtime Policy
+
+```text
+AGENTS.md / SKILL.md
+  → Instructions: Tells the agent what it SHOULD do.
+
+OpenCode permission + plugin guard.js (tool.execute.before) / OS / Git
+  → Runtime Policy: Determines what it is ALLOWED to do.
+```
+
+- **DOCUMENTATION ONLY:** prompt markdown that relies on LLM instruction-following
+  (`SKILL.md`, `AGENTS.md`, `/delegate`, and the `subagent-guard` CLI when not invoked).
+- **RUNTIME ENFORCED:** OpenCode `permission` and the plugin `tool.execute.before` hook,
+  plus OS/filesystem boundaries.
+- **PARTIALLY ENFORCED:** `bash` prefix rules and post-tool detection.
+
+> **Core Mandate:** Do not make the agent smarter. Make the agent more bounded.
+
+---
+
+---
+
 ## Architecture: Who Owns the Delegation Decision?
 
 Three candidate architectures, and why none is sufficient alone.
