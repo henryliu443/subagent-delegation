@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DelegationContract",
+  "description": "Machine-readable delegation contract establishing explicit authority boundaries for sub-agents.",
+  "type": "object",
+  "properties": {
+    "delegation": {
+      "type": "object",
+      "required": ["id", "goal", "authority"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the delegation task."
+        },
+        "goal": {
+          "type": "string",
+          "description": "The specific scoped goal for the sub-agent."
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "include": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Glob patterns of context files to include."
+            },
+            "exclude": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Glob patterns of files to strictly exclude."
+            }
+          }
+        },
+        "authority": {
+          "type": "object",
+          "required": ["write"],
+          "properties": {
+            "read": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Glob patterns allowed for read operations."
+            },
+            "write": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Glob patterns allowed for write / modify operations."
+            },
+            "execute": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "List or patterns of allowed executable commands."
+            },
+            "deny": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Explicitly forbidden commands or glob patterns."
+            }
+          }
+        },
+        "return": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": ["structured", "markdown", "json"],
+              "default": "structured"
+            },
+            "required": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Mandatory keys/fields required in the return delta."
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": true
+            },
+            "commands": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Commands that must pass before task can be marked DONE."
+            }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "max_tokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["delegation"]
+}

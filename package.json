@@ -1,0 +1,11 @@
+{
+  "name": "subagent-delegation",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Delegation decision framework + runtime enforcement for coding agents.",
+  "scripts": {
+    "test": "node test/guard-plugin.test.mjs",
+    "demo": "./demo/run_demo.sh"
+  }
+}
